@@ -4,6 +4,14 @@
 #include <ev.h>
 #include "cJSON.h"
 
+#ifndef container_of
+#define container_of(ptr, type, member)					\
+	({								\
+		const __typeof__(((type *) NULL)->member) *__mptr = (ptr);	\
+		(type *) ((char *) __mptr - offsetof(type, member));	\
+	})
+#endif
+
 typedef struct {
     void *data;
     int error_code;
@@ -25,6 +33,17 @@ struct jrpc_server {
     struct jprc_procedure *procedures;  
 };
 
-int jrpc_server_init(struct jrpc_server *server, int port);
+struct jrpc_connection {
+    int fd;
+    int pos;
+    struct ev_io io;
+    unsigned int buffer_size;
+    char *buffer;
+};
 
+int jrpc_server_init(struct jrpc_server *server, int port);
+int jprc_register_procedure(struct jrpc_server *server, jrpc_function func, char *name, void *data);
+int jprc_deregister_procedure(struct jrpc_server *server, char *name);
+void jprc_server_run(struct jrpc_server *server);
+void jprc_server_destroy(struct jrpc_server *server);
 #endif
