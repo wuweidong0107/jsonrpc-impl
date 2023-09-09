@@ -22,11 +22,11 @@ typedef struct {
     void *data;
     int error_code;
     char *error_message;
-} jprc_ctx_t;
+} jrpc_ctx_t;
 
-typedef cJSON* (*jrpc_function)(jprc_ctx_t *context, cJSON *params, cJSON *id);
+typedef cJSON* (*jrpc_function)(jrpc_ctx_t *context, cJSON *params, cJSON *id);
 
-struct jrpc_procedur {
+struct jrpc_procedure {
     char *name;
     jrpc_function function;
     void *data;
@@ -36,20 +36,23 @@ struct jrpc_server {
     int port;
     struct  ev_loop *loop;
     ev_io listen_watcher;
-    struct jprc_procedure *procedures;  
+    int procedure_count;
+    struct jrpc_procedure *procedures;  
 };
 
 struct jrpc_connection {
     int fd;
     int pos;
+    struct jrpc_server *server;
     struct ev_io io;
     unsigned int buffer_size;
     char *buffer;
 };
 
 int jrpc_server_init(struct jrpc_server *server, int port);
-int jprc_register_procedure(struct jrpc_server *server, jrpc_function func, char *name, void *data);
-int jprc_deregister_procedure(struct jrpc_server *server, char *name);
-void jprc_server_run(struct jrpc_server *server);
-void jprc_server_destroy(struct jrpc_server *server);
+int jrpc_register_procedure(struct jrpc_server *server, jrpc_function func, char *name, void *data);
+int jrpc_deregister_procedure(struct jrpc_server *server, char *name);
+void jrpc_dump_procedure(struct jrpc_server *server);
+void jrpc_server_run(struct jrpc_server *server);
+void jrpc_server_destroy(struct jrpc_server *server);
 #endif

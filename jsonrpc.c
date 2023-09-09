@@ -50,6 +50,18 @@ static int send_error(struct jrpc_connection *conn, int code, const char *messag
     return ret;
 }
 
+static int eval_request(struct jrpc_connection *conn, cJSON *root)
+{
+    cJSON *method, *params, *id;
+    method = cJSON_GetObjectItem(root, "method");
+    if (method != NULL && method->type == cJSON_String) {
+        // TBD: invoke_procedure();
+        return 0;
+    }
+    send_error(conn, JRPC_INVALID_REQUEST, "The JSON sent is not a valid Request object.", NULL);
+    return -1;
+}
+
 static void connection_cb(struct ev_loop *loop, ev_io *w, int revents)
 {
     struct jrpc_connection *conn = container_of(w, struct jrpc_connection, io);
@@ -85,6 +97,11 @@ static void connection_cb(struct ev_loop *loop, ev_io *w, int revents)
             char *str_result = cJSON_Print(root);
             printf("Got JSON: \n%s\n", str_result);
             free(str_result);
+
+            if (root->type == cJSON_Object) {
+                eval_request(conn, root);
+            }
+
             cJSON_Delete(root);
         } else {
             if (end_ptr != (conn->buffer + conn->pos)) {
@@ -99,6 +116,7 @@ static void connection_cb(struct ev_loop *loop, ev_io *w, int revents)
 
 static void accept_cb(struct ev_loop *loop, ev_io *w, int revents)
 {
+    struct jrpc_server *server = w->data;
     struct jrpc_connection *conn = malloc(sizeof(struct jrpc_connection));
     struct sockaddr_in their_addr;
     socklen_t sin_size = sizeof(their_addr);
@@ -111,10 +129,11 @@ static void accept_cb(struct ev_loop *loop, ev_io *w, int revents)
     }
     printf("server: got connection from %s\n", inet_ntoa(their_addr.sin_addr));
 
+    ev_io_init(&conn->io, connection_cb, conn->fd, EV_READ);
+    conn->server = server;
     conn->buffer_size = 1024;
     conn->buffer = malloc(conn->buffer_size);
     conn->pos = 0;
-    ev_io_init(&conn->io, connection_cb, conn->fd, EV_READ);
     ev_io_start(loop, &conn->io);
 }
 
@@ -148,6 +167,7 @@ static int __jrpc_server_start(struct jrpc_server *server)
     }
 
     ev_io_init(&server->listen_watcher, accept_cb, fd, EV_READ);
+    server->listen_watcher.data = server;
     ev_io_start(server->loop, &server->listen_watcher);
 
     return 0;
@@ -163,22 +183,100 @@ int jrpc_server_init(struct jrpc_server *server, int port)
     return __jrpc_server_start(server);
 }
 
-int jprc_register_procedure(struct jrpc_server *server, jrpc_function func, char *name, void *data)
+void jrpc_dump_procedure(struct jrpc_server *server)
 {
+    int i;
+
+    for (i = 0; i < server->procedure_count; i++){
+        printf("%s\n", server->procedures[i].name);
+    }
+}
+
+int jrpc_register_procedure(struct jrpc_server *server, jrpc_function func, char *name, void *data)
+{
+    int i;
+
+    if (name == NULL) {
+        return -1;
+    }
+
+    // if already, then just replace
+    for (i = 0; i < server->procedure_count; i++){
+        if(!strcmp(name, server->procedures[i].name)){
+            if (server->procedures[i].name)
+                free(server->procedures[i].name);
+            if ((server->procedures[i].name = strdup(name)) == NULL)
+                return -1;
+            
+            server->procedures[i].function = func;
+            server->procedures[i].data = data;
+            return 0;
+        }
+    }
+
+    // Add a new one
+    i = server->procedure_count++;
+    if (!server->procedures) {
+        server->procedures = malloc(sizeof(struct jrpc_procedure));
+    } else {
+        struct jrpc_procedure *p = realloc(server->procedures, 
+                    sizeof(struct jrpc_procedure) * server->procedure_count);
+        if (!p)
+            return -1;
+        server->procedures = p;
+    }
+
+    if ((server->procedures[i].name = strdup(name)) == NULL)
+        return -1;
+    
+    server->procedures[i].function = func;
+    server->procedures[i].data = data;
     return 0;
 }
 
-int jprc_deregister_procedure(struct jrpc_server *server, char *name)
+int jrpc_deregister_procedure(struct jrpc_server *server, char *name)
 {
+    int i, found = 0;
+    if (name == NULL)
+        return -1;
+        
+    if (server->procedures) {
+        for (i=0; i<server->procedure_count; i++) {
+            if (found)
+                server->procedures[i-1] = server->procedures[i];
+            else if (!strcmp(name, server->procedures[i].name)) {
+                found = 1;
+                free(server->procedures[i].name);
+                server->procedures[i].name = NULL;
+            }
+        }
+        if (found) {
+            server->procedure_count--;
+            if (server->procedure_count) {
+                struct jrpc_procedure *p = realloc(server->procedures,
+                    sizeof(struct jrpc_procedure) * server->procedure_count);
+                if (!p) {
+                    perror("realloc");
+                    return -1;
+                }
+                server->procedures = p;
+            } else {
+                server->procedures = NULL;
+            }
+        }
+    } else {
+        fprintf(stderr, "server: procedure '%s' not found \n", name);
+        return -1;
+    }
     return 0;
 }
 
-void jprc_server_run(struct jrpc_server *server)
+void jrpc_server_run(struct jrpc_server *server)
 {
     ev_run(server->loop, 0);
 }
 
-void jprc_server_destroy(struct jrpc_server *server)
+void jrpc_server_destroy(struct jrpc_server *server)
 {
 
 }
