@@ -12,6 +12,12 @@
 	})
 #endif
 
+#define JRPC_PARSE_ERROR -32700
+#define JRPC_INVALID_REQUEST -32600
+#define JRPC_METHOD_NOT_FOUND -32601
+#define JRPC_INVALID_PARAMS -32603
+#define JRPC_INTERNAL_ERROR -32693
+
 typedef struct {
     void *data;
     int error_code;

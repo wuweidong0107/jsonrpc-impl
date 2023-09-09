@@ -13,11 +13,41 @@
 
 struct ev_loop *loop;
 
-static void close_connection(struct jrpc_connection *conn)
+static void close_connection(struct ev_loop *loop, ev_io *w)
 {
+    struct jrpc_connection *conn = container_of(w, struct jrpc_connection, io);
+    ev_io_stop(loop, w);
     close(conn->fd);
     free(conn->buffer);
     free(conn);
+}
+
+static int send_response(struct jrpc_connection *conn, char *response)
+{
+    ssize_t write_bytes;
+    write_bytes = write(conn->fd, response, strlen(response));
+    if (write_bytes > 0) {
+        write_bytes = write(conn->fd, "\n", 1);
+        return 0;
+    } else {
+        return -1;
+    }
+}
+
+static int send_error(struct jrpc_connection *conn, int code, const char *message, cJSON* id)
+{
+    int ret = 0;
+    cJSON *result_root = cJSON_CreateObject();
+    cJSON *error_root = cJSON_CreateObject();
+    cJSON_AddNumberToObject(error_root, "code", code);
+    cJSON_AddStringToObject(error_root, "message", message);
+    cJSON_AddItemToObject(result_root, "error", error_root);
+    cJSON_AddItemToObject(result_root, "id", id);
+    char *str_result = cJSON_Print(result_root);
+    ret = send_response(conn, str_result);
+    free(str_result);
+    cJSON_Delete(result_root);
+    return ret;
 }
 
 static void connection_cb(struct ev_loop *loop, ev_io *w, int revents)
@@ -31,7 +61,7 @@ static void connection_cb(struct ev_loop *loop, ev_io *w, int revents)
         char *new_buf = realloc(conn->buffer, conn->buffer_size*=2);
         if (new_buf == NULL) {
             perror("Memory error");
-            return close_connection(conn);
+            return close_connection(loop, w);
         }
         conn->buffer = new_buf;
         memset(conn->buffer + conn->pos, 0, conn->buffer_size - conn->pos);
@@ -40,11 +70,11 @@ static void connection_cb(struct ev_loop *loop, ev_io *w, int revents)
     max_read_size = conn->buffer_size - conn->pos - 1;
     if ((bytes_read = read(fd, conn->buffer + conn->pos, max_read_size)) == -1) {
         perror("read()");
-        return close_connection(conn);
+        return close_connection(loop, w);
     }
     if (!bytes_read) {
         printf("no data now\n");
-        return close_connection(conn);
+        return close_connection(loop, w);
     } else {
         printf("got: %s\n", conn->buffer);
         conn->pos += bytes_read;
@@ -60,7 +90,8 @@ static void connection_cb(struct ev_loop *loop, ev_io *w, int revents)
             if (end_ptr != (conn->buffer + conn->pos)) {
                 printf("Invalid JSON data: \n---\n%s\n---\n", conn->buffer);
             }
-            return close_connection(conn);
+            send_error(conn, JRPC_PARSE_ERROR, "Parse error. Invalid JSON was received by the server.", NULL);
+            return close_connection(loop, w);
         }
 
     }
