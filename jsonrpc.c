@@ -43,11 +43,26 @@ static void connection_cb(struct ev_loop *loop, ev_io *w, int revents)
         return close_connection(conn);
     }
     if (!bytes_read) {
-        printf("read no data\n");
+        printf("no data now\n");
         return close_connection(conn);
     } else {
-        conn->pos += bytes_read;
         printf("got: %s\n", conn->buffer);
+        conn->pos += bytes_read;
+        cJSON *root;
+        const char *end_ptr = NULL;
+
+        if ((root = cJSON_ParseWithOpts(conn->buffer, &end_ptr, cJSON_False)) != NULL) {
+            char *str_result = cJSON_Print(root);
+            printf("Got JSON: \n%s\n", str_result);
+            free(str_result);
+            cJSON_Delete(root);
+        } else {
+            if (end_ptr != (conn->buffer + conn->pos)) {
+                printf("Invalid JSON data: \n---\n%s\n---\n", conn->buffer);
+            }
+            return close_connection(conn);
+        }
+
     }
 }
 
@@ -102,7 +117,6 @@ static int __jrpc_server_start(struct jrpc_server *server)
     }
 
     ev_io_init(&server->listen_watcher, accept_cb, fd, EV_READ);
-    server->listen_watcher.data = server;
     ev_io_start(server->loop, &server->listen_watcher);
 
     return 0;

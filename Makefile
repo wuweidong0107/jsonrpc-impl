@@ -26,6 +26,7 @@ export TOPDIR
 
 TARGET := server
 
+obj-y += cJSON.o
 obj-y += jsonrpc.o
 obj-y += server.o
 
